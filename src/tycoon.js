@@ -1,44 +1,24 @@
-// The money machine: droppers, conveyor, refiners, collector, upgrade pads, armory, sentries.
+// The money machine: droppers, conveyor, refiners, collector, upgrade pads, armory, sentries, walls, allies.
 import * as THREE from 'three';
 import { A, propInstance, loadGLTF } from './assets.js';
 import { makeLabel, fmt, rand } from './util.js';
 import { SFX } from './audio.js';
 import { WEAPONS } from './weapons.js';
+import { UPGRADES, CATS, DROPPER_VALUE } from './upgrades.js';
 
-const BELT_Z = -22, BELT_Y = 0.9, BELT_X0 = -13, BELT_X1 = 14.2, BELT_SPEED = 2.6;
-const DROPPER_X = [-11, -7.5, -4, -0.5, 3];
-const DROPPER_VALUE = [5, 9, 14, 20, 30];
-const REFINER_X = [6.5, 9, 11.5];
-const REFINER_MULT = [2, 2, 3];
+const BELT_Z = -22, BELT_Y = 0.9, BELT_X0 = -20, BELT_X1 = 14.2;
+const DROPPER_X = Array.from({ length: 8 }, (_, i) => -18 + i * 3.5);
+const REFINER_X = [9, 11, 13];
+const REFINER_BASE = [2, 2, 3];
 const REFINER_COLOR = [0x4fc3f7, 0xffd54a, 0xff7043];
-
-export const UPGRADES = [
-  { id: 'd1', name: 'Dropper I', price: 0, req: null, desc: 'Drops $5 ore' },
-  { id: 'd2', name: 'Dropper II', price: 200, req: 'd1', desc: 'Drops $9 ore' },
-  { id: 'r1', name: 'Refiner I', price: 500, req: 'd2', desc: 'Ore value ×2' },
-  { id: 'd3', name: 'Dropper III', price: 900, req: 'r1', desc: 'Drops $14 ore' },
-  { id: 'speed1', name: 'Fast Droppers', price: 1400, req: 'd3', desc: 'Drop rate +40%' },
-  { id: 'auto', name: 'Auto Collector', price: 1800, req: 'speed1', desc: 'Vault pays straight to you' },
-  { id: 'r2', name: 'Refiner II', price: 2800, req: 'auto', desc: 'Ore value ×2 again' },
-  { id: 'd4', name: 'Dropper IV', price: 3600, req: 'r2', desc: 'Drops $20 ore' },
-  { id: 'armor', name: 'Body Armor', price: 4500, req: 'auto', desc: '+50 max health' },
-  { id: 'value1', name: 'Rich Ore', price: 6000, req: 'd4', desc: 'All ore ×2' },
-  { id: 'turret1', name: 'Sentry Turret', price: 7500, req: 'value1', desc: 'Auto-shoots raiders' },
-  { id: 'd5', name: 'Dropper V', price: 9500, req: 'turret1', desc: 'Drops $30 ore' },
-  { id: 'dmg', name: 'Hollow Points', price: 11000, req: 'armor', desc: '+30% weapon damage' },
-  { id: 'speed2', name: 'Turbo Droppers', price: 14000, req: 'd5', desc: 'Drop rate +60%' },
-  { id: 'r3', name: 'Refiner III', price: 20000, req: 'speed2', desc: 'Ore value ×3' },
-  { id: 'turret2', name: 'Sentry Turret II', price: 26000, req: 'r3', desc: 'Second sentry' },
-  { id: 'value2', name: 'Plutonium Ore', price: 40000, req: 'value2req', desc: 'All ore ×3' },
-];
-UPGRADES.find((u) => u.id === 'value2').req = 'turret2';
-
+const TURRET_POSTS = [[-15, -8.5], [15, -8.5], [-15, -32], [15, -32]];
 const PAD_SLOTS = [];
-for (let r = 0; r < 2; r++) for (let i = 0; i < 9; i++) PAD_SLOTS.push([-16 + i * 4, -15 + r * 4]);
+for (let r = 0; r < 3; r++) for (let i = 0; i < 9; i++) PAD_SLOTS.push([-16 + i * 4, -16 + r * 3.5]);
+const MAX_WEAPON_LEVEL = 10;
 
 export class Tycoon {
-  constructor({ scene, player, hud, floaters, particles, enemies, weapons }) {
-    Object.assign(this, { scene, player, hud, floaters, particles, enemies, weapons });
+  constructor({ scene, player, hud, floaters, particles, enemies, weapons, walls, allies }) {
+    Object.assign(this, { scene, player, hud, floaters, particles, enemies, weapons, walls, allies });
     this.wallet = 0;
     this.vault = 0;
     this.purchased = new Set();
@@ -52,16 +32,19 @@ export class Tycoon {
     scene.add(this.group);
     this.padCooldown = 0;
     this.time = 0;
-    this.prompt = null;
+    this.bankTimer = 0;
     document.addEventListener('keydown', (e) => { if (e.code === 'KeyE' && this.player.locked) this.tryCollect(); });
   }
 
-  get dropInterval() { return 3.2 * (this.purchased.has('speed1') ? 0.7 : 1) * (this.purchased.has('speed2') ? 0.62 : 1); }
-  get valueMult() { return (this.purchased.has('value1') ? 2 : 1) * (this.purchased.has('value2') ? 3 : 1); }
+  // number of purchased upgrades in a chain, e.g. level('sp') for Dropper Speed
+  level(prefix) { let n = 0; for (const id of this.purchased) if (id.startsWith(prefix) && /^\d+$/.test(id.slice(prefix.length))) n++; return n; }
+  get dropInterval() { return 3.2 * Math.pow(0.75, this.level('sp')); }
+  get valueMult() { return Math.pow(1.6, this.level('v')); }
+  get beltSpeed() { return 2.6 * Math.pow(1.3, this.level('bs')); }
+  refinerMult(i) { return REFINER_BASE[i] + this.level('rb'); }
 
   async build() {
     const g = this.group;
-    // Concrete slab for the plot.
     const slab = new THREE.Mesh(new THREE.BoxGeometry(46, 0.12, 28), new THREE.MeshStandardMaterial({ color: 0x8a8d90, roughness: 0.95 }));
     slab.position.set(0, 0.06, -20);
     slab.receiveShadow = true;
@@ -69,10 +52,9 @@ export class Tycoon {
     const stripe = new THREE.Mesh(new THREE.BoxGeometry(46, 0.13, 0.3), new THREE.MeshStandardMaterial({ color: 0xffd54a }));
     stripe.position.set(0, 0.07, -6.2); g.add(stripe);
 
-    // Conveyor belt with animated stripes.
     const beltTex = makeBeltTexture();
     beltTex.wrapS = beltTex.wrapT = THREE.RepeatWrapping;
-    beltTex.repeat.set(14, 1);
+    beltTex.repeat.set(18, 1);
     this.beltTex = beltTex;
     const belt = new THREE.Mesh(new THREE.BoxGeometry(BELT_X1 - BELT_X0 + 1, 0.25, 1.5), new THREE.MeshStandardMaterial({ map: beltTex, roughness: 0.8 }));
     belt.position.set((BELT_X0 + BELT_X1) / 2, BELT_Y - 0.125, BELT_Z);
@@ -91,7 +73,6 @@ export class Tycoon {
       leg.position.set(x, (BELT_Y - 0.25) / 2, BELT_Z + dz);
       g.add(leg);
     }
-    // Collector hopper at the end of the belt.
     const hopper = new THREE.Group();
     const funnel = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 0.8, 1.6, 8, 1, true), new THREE.MeshStandardMaterial({ color: 0x2f7d4f, roughness: 0.6, metalness: 0.3, side: THREE.DoubleSide }));
     funnel.position.y = BELT_Y + 0.6;
@@ -101,18 +82,21 @@ export class Tycoon {
     hopper.position.set(BELT_X1 + 1.5, 0, BELT_Z);
     hopper.traverse((o) => { if (o.isMesh) o.castShadow = true; });
     g.add(hopper);
-    this.hopper = hopper;
     this.vaultLabel = makeLabel(['VAULT', '$0'], { accent: '#6cf28a', size: 44, scale: 0.55 });
     this.vaultLabel.position.set(BELT_X1 + 1.5, 4.2, BELT_Z);
     g.add(this.vaultLabel);
-    // Collect pad in front of the hopper.
     this.collectPad = this.makePad(BELT_X1 + 1.5, BELT_Z + 4, 0x6cf28a);
     this.collectLabel = makeLabel(['COLLECT', 'Press E'], { accent: '#6cf28a', size: 40, scale: 0.45 });
     this.collectLabel.position.set(BELT_X1 + 1.5, 2.2, BELT_Z + 4);
     g.add(this.collectLabel);
+    // repair pad next to the collector
+    this.repairPad = this.makePad(BELT_X1 + 5.5, BELT_Z + 4, 0x4fc3f7);
+    this.repairLabel = makeLabel(['REPAIR WALLS', '$0'], { accent: '#4fc3f7', size: 40, scale: 0.45 });
+    this.repairLabel.position.set(BELT_X1 + 5.5, 2.2, BELT_Z + 4);
+    g.add(this.repairLabel);
+    this.repairPad.visible = false; this.repairLabel.visible = false;
     this.blockers = [{ type: 'box', x: (BELT_X0 + BELT_X1) / 2, z: BELT_Z, hx: (BELT_X1 - BELT_X0) / 2 + 0.5, hz: 0.9 }, { type: 'circle', x: BELT_X1 + 1.5, z: BELT_Z, r: 1.5 }];
 
-    // Dropper machines (hidden until bought).
     for (let i = 0; i < DROPPER_X.length; i++) {
       const d = this.makeDropper(DROPPER_X[i], i);
       d.visible = false;
@@ -120,20 +104,19 @@ export class Tycoon {
       this.droppers.push({ mesh: d, active: false, timer: rand(0, 2), value: DROPPER_VALUE[i], index: i });
     }
     for (let i = 0; i < REFINER_X.length; i++) {
-      const r = this.makeRefiner(REFINER_X[i], REFINER_COLOR[i], REFINER_MULT[i]);
+      const r = this.makeRefiner(REFINER_X[i], REFINER_COLOR[i], REFINER_BASE[i]);
       r.visible = false;
       g.add(r);
-      this.refiners.push({ mesh: r, active: false, x: REFINER_X[i], mult: REFINER_MULT[i], color: REFINER_COLOR[i] });
+      this.refiners.push({ mesh: r, active: false, x: REFINER_X[i], index: i, color: REFINER_COLOR[i], label: r.userData.label });
     }
-    // Armory pads.
-    const sign = makeLabel(['ARMORY', 'walk onto a pad to buy'], { accent: '#ff5252', size: 44, scale: 0.6 });
+    const sign = makeLabel(['ARMORY', 'step on a pad to buy or upgrade'], { accent: '#ff5252', size: 44, scale: 0.6 });
     sign.position.set(27, 5, -19);
     g.add(sign);
     const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 4.5), new THREE.MeshStandardMaterial({ color: 0x555 }));
     pole.position.set(27, 2.25, -19); g.add(pole);
-    const buyable = WEAPONS.filter((w) => w.price > 0);
+    const buyable = WEAPONS.filter((w) => w.price > 0 || w.id === 'pistol');
     buyable.forEach((w, i) => {
-      const x = 27, z = -8 - i * 3.6;
+      const x = 27, z = -6 - i * 3.6;
       const pad = this.makePad(x, z, 0xff5252);
       const label = makeLabel([w.name, `$${fmt(w.price)}`, w.desc], { accent: '#ff5252', size: 36, scale: 0.55 });
       label.position.set(x, 2.4, z);
@@ -143,7 +126,6 @@ export class Tycoon {
     const st = await propInstance(A.prop('Structure_2'));
     st.position.set(34, 0, -19); st.rotation.y = -Math.PI / 2; st.scale.setScalar(1.4); g.add(st);
     this.blockers.push({ type: 'box', x: 34, z: -19, hx: 4, hz: 4 });
-    // Display weapons on crates around the armory.
     for (let i = 0; i < 3; i++) {
       const crate = await propInstance(A.prop('Crate'));
       crate.position.set(30.5, 0, -10 - i * 8); crate.scale.setScalar(1.3); g.add(crate);
@@ -155,10 +137,10 @@ export class Tycoon {
   }
 
   makePad(x, z, color) {
-    const pad = new THREE.Mesh(new THREE.CylinderGeometry(1.4, 1.4, 0.16, 28), new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.35, roughness: 0.4 }));
+    const pad = new THREE.Mesh(new THREE.CylinderGeometry(1.4, 1.4, 0.16, 28), new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.45, roughness: 0.4 }));
     pad.position.set(x, 0.2, z);
     pad.receiveShadow = true;
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(1.45, 0.06, 8, 40), new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: color, emissiveIntensity: 0.8 }));
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(1.45, 0.06, 8, 40), new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: color, emissiveIntensity: 1.2 }));
     ring.rotation.x = Math.PI / 2;
     ring.position.y = 0.09;
     pad.add(ring);
@@ -168,12 +150,12 @@ export class Tycoon {
 
   makeDropper(x, i) {
     const grp = new THREE.Group();
-    const hue = [0x9e9e9e, 0x64b5f6, 0x81c784, 0xffb74d, 0xba68c8][i];
-    const body = new THREE.Mesh(new THREE.BoxGeometry(1.8, 1.4, 1.8), new THREE.MeshStandardMaterial({ color: hue, roughness: 0.5, metalness: 0.4 }));
+    const hue = [0x9e9e9e, 0x64b5f6, 0x81c784, 0xffb74d, 0xba68c8, 0x4dd0e1, 0xf06292, 0xffd54a][i];
+    const body = new THREE.Mesh(new THREE.BoxGeometry(1.8, 1.4, 1.8), new THREE.MeshStandardMaterial({ color: hue, roughness: 0.45, metalness: 0.5 }));
     body.position.y = BELT_Y + 2.4;
     const spout = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.5, 0.8, 10), new THREE.MeshStandardMaterial({ color: 0x37474f, roughness: 0.6, metalness: 0.5 }));
     spout.position.y = BELT_Y + 1.3;
-    const light = new THREE.Mesh(new THREE.SphereGeometry(0.14, 10, 10), new THREE.MeshStandardMaterial({ color: 0x00e676, emissive: 0x00e676, emissiveIntensity: 2 }));
+    const light = new THREE.Mesh(new THREE.SphereGeometry(0.14, 10, 10), new THREE.MeshStandardMaterial({ color: 0x00e676, emissive: 0x00e676, emissiveIntensity: 2.5 }));
     light.position.set(0.7, BELT_Y + 3.0, 0.95);
     grp.add(body, spout, light);
     for (const [dx, dz] of [[-0.7, -0.7], [0.7, -0.7], [-0.7, 0.7], [0.7, 0.7]]) {
@@ -181,7 +163,7 @@ export class Tycoon {
       leg.position.set(dx, (BELT_Y + 1.7) / 2, dz * 1.6);
       grp.add(leg);
     }
-    const label = makeLabel([`DROPPER ${['I', 'II', 'III', 'IV', 'V'][i]}`, `$${DROPPER_VALUE[i]} ore`], { size: 36, scale: 0.35, accent: '#ffd54a' });
+    const label = makeLabel([`DROPPER ${['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII'][i]}`, `$${DROPPER_VALUE[i]} ore`], { size: 36, scale: 0.35, accent: '#ffd54a' });
     label.position.y = BELT_Y + 3.8;
     grp.add(label);
     grp.position.set(x, 0, BELT_Z);
@@ -199,25 +181,29 @@ export class Tycoon {
     }
     const top = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.5, 2.6), mat);
     top.position.y = BELT_Y + 2.2;
-    const beam = new THREE.Mesh(new THREE.BoxGeometry(0.15, 1.3, 1.9), new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 1.2, transparent: true, opacity: 0.45 }));
+    const beam = new THREE.Mesh(new THREE.BoxGeometry(0.15, 1.3, 1.9), new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 2.0, transparent: true, opacity: 0.5 }));
     beam.position.y = BELT_Y + 1.2;
     grp.add(top, beam);
     const label = makeLabel([`REFINER ×${mult}`], { size: 36, scale: 0.32, accent: '#' + new THREE.Color(color).getHexString() });
     label.position.y = BELT_Y + 3.1;
     grp.add(label);
+    grp.userData.label = label;
+    grp.userData.beam = beam;
     grp.position.set(x, 0, BELT_Z);
     grp.traverse((o) => { if (o.isMesh) o.castShadow = true; });
     return grp;
   }
 
   async makeTurret(x, z) {
+    const slot = { grp: null, head: null, cd: 0, x, z, building: true };
+    this.turrets.push(slot); // reserve synchronously; applyPurchases can run again before the models load
     const grp = new THREE.Group();
     const base = await propInstance(A.prop('Crate'));
     base.scale.setScalar(1.3);
     const head = new THREE.Group();
     const cannon = (await loadGLTF(A.weapon('ShortCannon'))).scene.clone(true);
     cannon.scale.setScalar(1.8);
-    cannon.rotation.y = Math.PI / 2; // muzzle (-X) now points +Z... rotate so barrel points -Z of head
+    cannon.rotation.y = Math.PI / 2;
     head.add(cannon);
     head.position.y = 1.35;
     const mount = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.45, 0.4, 12), new THREE.MeshStandardMaterial({ color: 0x37474f, metalness: 0.5 }));
@@ -227,7 +213,7 @@ export class Tycoon {
     grp.traverse((o) => { if (o.isMesh) o.castShadow = true; });
     this.group.add(grp);
     this.blockers.push({ type: 'box', x, z, hx: 0.7, hz: 0.7 });
-    this.turrets.push({ grp, head, cd: 0, x, z });
+    Object.assign(slot, { grp, head, building: false });
   }
 
   refreshPads() {
@@ -237,28 +223,47 @@ export class Tycoon {
     for (const u of UPGRADES) {
       if (this.purchased.has(u.id)) continue;
       if (u.req && !this.purchased.has(u.req)) continue;
+      if (slot >= PAD_SLOTS.length) break;
       const [x, z] = PAD_SLOTS[slot++];
-      const pad = this.makePad(x, z, 0xffd54a);
-      const label = makeLabel([u.name, u.price ? `$${fmt(u.price)}` : 'FREE', u.desc], { accent: '#ffd54a', size: 36, scale: 0.55 });
+      const cat = CATS[u.cat];
+      const pad = this.makePad(x, z, new THREE.Color(cat.color).getHex());
+      const label = makeLabel([u.name, u.price ? `$${fmt(u.price)}` : 'FREE', u.desc], { accent: cat.color, size: 36, scale: 0.55 });
       label.position.set(x, 2.4, z);
       this.group.add(label);
       this.pads.push({ kind: 'upgrade', upgrade: u, pad, label, x, z, r: 1.4 });
     }
     for (const p of this.pads.filter((p) => p.kind === 'weapon')) {
       const owned = this.weapons.owned.includes(p.weapon.id);
-      p.label.userData.redraw([p.weapon.name, owned ? 'OWNED' : `$${fmt(p.weapon.price)}`, p.weapon.desc], { accent: owned ? '#6cf28a' : '#ff5252' });
-      p.pad.material.color.set(owned ? 0x6cf28a : 0xff5252);
-      p.pad.material.emissive.set(owned ? 0x6cf28a : 0xff5252);
+      const lvl = this.weapons.levels[p.weapon.id] || 0;
+      let lines, accent;
+      if (!owned) { lines = [p.weapon.name, `$${fmt(p.weapon.price)}`, p.weapon.desc]; accent = '#ff5252'; }
+      else if (lvl >= MAX_WEAPON_LEVEL) { lines = [p.weapon.name, 'MAX LEVEL', p.weapon.desc]; accent = '#6cf28a'; }
+      else { lines = [`${p.weapon.name} Lv${lvl + 1}`, `$${fmt(this.weapons.upgradeCost(p.weapon.id))}`, '+damage, +ammo, faster reload']; accent = '#ffb74d'; }
+      p.label.userData.redraw(lines, { accent });
+      p.pad.material.color.set(accent); p.pad.material.emissive.set(accent);
     }
   }
 
   applyPurchases() {
     this.droppers.forEach((d, i) => { d.active = this.purchased.has(`d${i + 1}`); d.mesh.visible = d.active; });
-    this.refiners.forEach((r, i) => { r.active = this.purchased.has(`r${i + 1}`); r.mesh.visible = r.active; });
-    this.player.maxHp = this.purchased.has('armor') ? 150 : 100;
-    this.weapons.damageMult = this.purchased.has('dmg') ? 1.3 : 1;
-    if (this.purchased.has('turret1') && this.turrets.length < 1) this.makeTurret(-17, -8.5);
-    if (this.purchased.has('turret2') && this.turrets.length < 2) this.makeTurret(17, -8.5);
+    this.refiners.forEach((r, i) => {
+      r.active = this.purchased.has(`r${i + 1}`); r.mesh.visible = r.active;
+      r.label.userData.redraw([`REFINER ×${this.refinerMult(i)}`], { accent: '#' + new THREE.Color(r.color).getHexString() });
+    });
+    this.player.maxHp = 100 + 50 * this.level('armor');
+    this.player.regenRate = 6 * (1 + this.level('regen'));
+    this.player.speedMult = this.purchased.has('boots1') ? 1.22 : 1;
+    this.weapons.damageMult = Math.pow(1.25, this.level('hp'));
+    this.enemies.rewardMult = Math.pow(1.3, this.level('bounty'));
+    this.enemies.headshotBonus = 1 + this.level('lucky');
+    const sentries = this.level('sentry');
+    for (let i = this.turrets.length; i < sentries; i++) this.makeTurret(...TURRET_POSTS[i]);
+    this.sentryDamage = 16 * Math.pow(1.4, this.level('sd'));
+    this.sentryRange = 32 + 8 * this.level('sr');
+    this.walls.setLevel(this.level('wall'), Math.pow(1.6, this.level('wallhp')));
+    for (const key of ['sam', 'shaun', 'pug', 'matt', 'shepherd', 'lis']) if (this.purchased.has(`ally_${key}`)) this.allies.hire(key);
+    this.allies.dmgMult = Math.pow(1.35, this.level('gt'));
+    this.allies.dogMult = Math.pow(1.3, this.level('dog'));
   }
 
   buy(u) {
@@ -276,12 +281,35 @@ export class Tycoon {
   }
 
   buyWeapon(w) {
-    if (this.weapons.owned.includes(w.id)) { this.weapons.equip(w.id); return; }
-    if (this.wallet < w.price) { this.hud.log(`Need $${fmt(w.price - this.wallet)} more for ${w.name}`, 'bad'); SFX.deny(); return; }
-    this.wallet -= w.price;
-    this.weapons.own(w.id);
+    if (this.weapons.owned.includes(w.id)) {
+      const lvl = this.weapons.levels[w.id] || 0;
+      if (lvl >= MAX_WEAPON_LEVEL) { this.weapons.equip(w.id); return; }
+      const cost = this.weapons.upgradeCost(w.id);
+      if (this.wallet < cost) { this.hud.log(`Need $${fmt(cost - this.wallet)} more to upgrade ${w.name}`, 'bad'); SFX.deny(); return; }
+      this.wallet -= cost;
+      this.weapons.upgrade(w.id);
+      this.hud.log(`${w.name} upgraded to level ${lvl + 1}!`, 'good');
+    } else {
+      if (this.wallet < w.price) { this.hud.log(`Need $${fmt(w.price - this.wallet)} more for ${w.name}`, 'bad'); SFX.deny(); return; }
+      this.wallet -= w.price;
+      this.weapons.own(w.id);
+      this.hud.log(`Bought ${w.name}!`, 'good');
+    }
     this.refreshPads();
-    this.hud.log(`Bought ${w.name}!`, 'good');
+    SFX.buy();
+    this.hud.setMoney(this);
+    this.onChange?.();
+  }
+
+  get repairCost() { return Math.ceil(this.walls.totalDamage * 1.5); }
+
+  tryRepair() {
+    const cost = this.repairCost;
+    if (cost <= 0) return;
+    if (this.wallet < cost) { this.hud.log(`Need $${fmt(cost - this.wallet)} more to repair the walls`, 'bad'); SFX.deny(); return; }
+    this.wallet -= cost;
+    this.walls.repairAll();
+    this.hud.log('Walls repaired!', 'good');
     SFX.buy();
     this.hud.setMoney(this);
     this.onChange?.();
@@ -308,7 +336,7 @@ export class Tycoon {
 
   deposit(v) {
     this.incomeLog.push([this.time, v]);
-    if (this.purchased.has('auto')) { this.wallet += v; SFX.coin(); }
+    if (this.purchased.has('auto1')) { this.wallet += v; SFX.coin(); }
     else this.vault += v;
     this.updateVaultLabel();
     this.hud.setMoney(this);
@@ -322,7 +350,7 @@ export class Tycoon {
   }
 
   spawnOre(d) {
-    if (this.ores.length > 80) return;
+    if (this.ores.length > 120) return;
     const v = d.value * this.valueMult;
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.5), new THREE.MeshStandardMaterial({ color: 0x8d6e63, roughness: 0.7, metalness: 0.2, emissive: 0x000000 }));
     mesh.castShadow = true;
@@ -336,24 +364,25 @@ export class Tycoon {
   update(dt) {
     this.time += dt;
     this.padCooldown -= dt;
-    this.beltTex.offset.x -= dt * BELT_SPEED / 2.2;
+    const beltSpeed = this.beltSpeed;
+    this.beltTex.offset.x -= dt * beltSpeed / 2.2;
     for (const d of this.droppers) {
       if (!d.active) continue;
       d.timer -= dt;
       if (d.timer <= 0) { d.timer = this.dropInterval * rand(0.9, 1.1); this.spawnOre(d); }
     }
-    for (const r of this.refiners) if (r.active) r.mesh.children[3].material.opacity = 0.35 + Math.sin(this.time * 6) * 0.12;
+    for (const r of this.refiners) if (r.active) r.mesh.userData.beam.material.opacity = 0.4 + Math.sin(this.time * 6) * 0.12;
     for (let i = this.ores.length - 1; i >= 0; i--) {
       const o = this.ores[i];
       const m = o.mesh;
       if (m.position.y > BELT_Y + 0.25) { o.vy -= 12 * dt; m.position.y = Math.max(BELT_Y + 0.25, m.position.y + o.vy * dt); }
       else {
-        m.position.x += BELT_SPEED * dt;
+        m.position.x += beltSpeed * dt;
         for (const r of this.refiners) {
           if (r.active && !o.refined.has(r) && m.position.x >= r.x) {
             o.refined.add(r);
-            o.value *= r.mult;
-            m.material.color.set(r.color); m.material.emissive.set(r.color); m.material.emissiveIntensity = 0.6; m.material.metalness = 0.6; m.material.roughness = 0.3;
+            o.value *= this.refinerMult(r.index);
+            m.material.color.set(r.color); m.material.emissive.set(r.color); m.material.emissiveIntensity = 0.8; m.material.metalness = 0.6; m.material.roughness = 0.3;
             m.scale.multiplyScalar(1.12);
             this.particles.emit(m.position, { count: 12, color: r.color, speed: 2, life: 0.5, gravity: 2 });
           }
@@ -369,7 +398,10 @@ export class Tycoon {
       }
       m.rotation.y += dt * 0.6;
     }
-    // Pads: step on to buy.
+    // bank interest
+    const bank = this.level('bank');
+    if (bank > 0) { this.bankTimer += dt; if (this.bankTimer >= 5) { this.bankTimer -= 5; const gain = this.wallet * 0.01 * bank * (5 / 60); if (gain >= 1) this.wallet += gain; } }
+
     let prompt = null;
     for (const p of this.pads) {
       const d = Math.hypot(this.player.pos.x - p.x, this.player.pos.z - p.z);
@@ -377,7 +409,11 @@ export class Tycoon {
       p.label.position.y = 2.4 + Math.sin(this.time * 2 + p.x) * 0.08;
       if (d < p.r) {
         if (p.kind === 'upgrade') prompt = `${p.upgrade.name} — ${p.upgrade.desc} (${p.upgrade.price ? '$' + fmt(p.upgrade.price) : 'free'})`;
-        else prompt = this.weapons.owned.includes(p.weapon.id) ? `${p.weapon.name} — owned (step on to equip)` : `${p.weapon.name} — $${fmt(p.weapon.price)}`;
+        else {
+          const owned = this.weapons.owned.includes(p.weapon.id);
+          const lvl = this.weapons.levels[p.weapon.id] || 0;
+          prompt = !owned ? `${p.weapon.name} — $${fmt(p.weapon.price)}` : lvl >= MAX_WEAPON_LEVEL ? `${p.weapon.name} — max level` : `Upgrade ${p.weapon.name} to Lv${lvl + 1} — $${fmt(this.weapons.upgradeCost(p.weapon.id))}`;
+        }
         if (!p.inside && this.padCooldown <= 0) {
           p.inside = true;
           this.padCooldown = 0.3;
@@ -387,7 +423,18 @@ export class Tycoon {
       } else p.inside = false;
     }
     const dc = Math.hypot(this.player.pos.x - this.collectPad.position.x, this.player.pos.z - this.collectPad.position.z);
-    if (dc < 1.6) prompt = this.purchased.has('auto') ? 'Auto collector active — vault pays you directly' : this.vault > 0 ? `Press E to collect $${fmt(this.vault)}` : 'Vault is empty — buy droppers!';
+    if (dc < 1.6) prompt = this.purchased.has('auto1') ? 'Auto collector active — vault pays you directly' : this.vault > 0 ? `Press E to collect $${fmt(this.vault)}` : 'Vault is empty — buy droppers!';
+    // repair pad
+    const damaged = this.walls.level > 0 && this.walls.totalDamage > 0;
+    this.repairPad.visible = this.repairLabel.visible = damaged;
+    if (damaged) {
+      if (Math.floor(this.time * 2) !== Math.floor((this.time - dt) * 2)) this.repairLabel.userData.redraw(['REPAIR WALLS', `$${fmt(this.repairCost)}`], { accent: '#4fc3f7' });
+      const dr = Math.hypot(this.player.pos.x - this.repairPad.position.x, this.player.pos.z - this.repairPad.position.z);
+      if (dr < 1.6) {
+        prompt = `Repair all walls — $${fmt(this.repairCost)}`;
+        if (!this.repairInside && this.padCooldown <= 0) { this.repairInside = true; this.padCooldown = 0.3; this.tryRepair(); }
+      } else this.repairInside = false;
+    }
     this.hud.prompt(prompt);
     this.updateTurrets(dt);
     if (Math.floor(this.time) !== Math.floor(this.time - dt)) this.hud.setMoney(this);
@@ -395,8 +442,9 @@ export class Tycoon {
 
   updateTurrets(dt) {
     for (const t of this.turrets) {
+      if (t.building) continue;
       t.cd -= dt;
-      let best = null, bd = 32;
+      let best = null, bd = this.sentryRange || 32;
       for (const e of this.enemies.list) {
         if (e.dead) continue;
         const d = Math.hypot(e.root.position.x - t.x, e.root.position.z - t.z);
@@ -410,7 +458,7 @@ export class Tycoon {
         t.cd = 0.4;
         const from = headWorld.clone().add(target.clone().sub(headWorld).normalize().multiplyScalar(1.2));
         this.weapons.tracer(from, target);
-        const res = this.enemies.hit(best, 16 * this.weapons.damageMult, target);
+        const res = this.enemies.hit(best, (this.sentryDamage || 16) * this.weapons.damageMult, target);
         this.particles.emit(target, { count: 5, color: 0x9b1111, speed: 2, life: 0.4 });
         if (res.killed) this.hud.hitmarker(true);
         SFX.shot('smg');
@@ -423,7 +471,9 @@ export class Tycoon {
     if (!s) return;
     this.wallet = s.wallet || 0;
     this.vault = s.vault || 0;
-    this.purchased = new Set(s.purchased || []);
+    // migrate v1 ids
+    const map = { auto: 'auto1', speed1: 'sp1', speed2: 'sp2', value1: 'v1', value2: 'v2', turret1: 'sentry1', turret2: 'sentry2', armor: 'armor1', dmg: 'hp1' };
+    this.purchased = new Set((s.purchased || []).map((id) => map[id] || id));
   }
 }
 

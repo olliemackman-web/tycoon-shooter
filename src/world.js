@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { A, propInstance, loadGLTF } from './assets.js';
 import { rand } from './util.js';
+import { Sky } from 'three/examples/jsm/objects/Sky.js';
 
 export const MAP_HALF = 110;
 
@@ -15,30 +16,43 @@ export class World {
 
   async build(onProgress) {
     const scene = this.scene;
-    scene.background = new THREE.Color(0x8fb6d8);
-    scene.fog = new THREE.Fog(0x8fb6d8, this.mobile ? 40 : 60, this.mobile ? 160 : 220);
+    scene.fog = new THREE.Fog(0xa9c4dd, this.mobile ? 45 : 70, this.mobile ? 170 : 260);
 
-    const hemi = new THREE.HemisphereLight(0xcfe6ff, 0x5a4a32, 1.1);
+    // Atmospheric sky; also baked into an environment map so materials pick up sky light and reflections.
+    const sky = new Sky();
+    sky.scale.setScalar(2000);
+    const sunDir = new THREE.Vector3(0.45, 0.42, 0.3).normalize();
+    sky.material.uniforms.turbidity.value = 6;
+    sky.material.uniforms.rayleigh.value = 1.1;
+    sky.material.uniforms.mieCoefficient.value = 0.003;
+    sky.material.uniforms.mieDirectionalG.value = 0.85;
+    sky.material.uniforms.sunPosition.value.copy(sunDir);
+    scene.add(sky);
+    this.sky = sky;
+    this.sunDir = sunDir;
+
+    const hemi = new THREE.HemisphereLight(0xd8ecff, 0x5f5140, 0.55);
     scene.add(hemi);
-    const sun = new THREE.DirectionalLight(0xfff1d6, 2.6);
-    sun.position.set(40, 70, 30);
+    const sun = new THREE.DirectionalLight(0xfff0d0, 3.2);
+    sun.position.copy(sunDir).multiplyScalar(120);
     sun.castShadow = true;
-    sun.shadow.mapSize.set(this.mobile ? 1024 : 2048, this.mobile ? 1024 : 2048);
+    const sm = this.mobile ? 1024 : 4096;
+    sun.shadow.mapSize.set(sm, sm);
     sun.shadow.camera.near = 10;
     sun.shadow.camera.far = 200;
     const s = 70;
     sun.shadow.camera.left = -s; sun.shadow.camera.right = s; sun.shadow.camera.top = s; sun.shadow.camera.bottom = -s;
-    sun.shadow.bias = -0.0008;
-    sun.shadow.normalBias = 0.02;
+    sun.shadow.bias = -0.0004;
+    sun.shadow.normalBias = 0.03;
+    sun.shadow.radius = 2;
     scene.add(sun);
     this.sun = sun;
 
     // Ground: big dirt plane with a faint grid texture so movement reads.
-    const gtex = makeGroundTexture();
-    gtex.wrapS = gtex.wrapT = THREE.RepeatWrapping;
-    gtex.repeat.set(60, 60);
+    const { color: gtex, bump } = makeGroundTexture();
+    for (const t of [gtex, bump]) { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(45, 45); t.anisotropy = 8; }
     gtex.colorSpace = THREE.SRGBColorSpace;
-    const ground = new THREE.Mesh(new THREE.PlaneGeometry(MAP_HALF * 2 + 40, MAP_HALF * 2 + 40), new THREE.MeshStandardMaterial({ map: gtex, roughness: 1, metalness: 0 }));
+    const ground = new THREE.Mesh(new THREE.PlaneGeometry(MAP_HALF * 2 + 40, MAP_HALF * 2 + 40), new THREE.MeshStandardMaterial({ map: gtex, bumpMap: bump, bumpScale: 0.6, roughness: 0.95, metalness: 0 }));
     ground.rotation.x = -Math.PI / 2;
     ground.receiveShadow = true;
     ground.name = 'ground';
@@ -171,21 +185,46 @@ export class World {
 }
 
 function makeGroundTexture() {
+  const size = 512;
   const c = document.createElement('canvas');
-  c.width = c.height = 256;
+  c.width = c.height = size;
   const g = c.getContext('2d');
-  g.fillStyle = '#6b5f47';
-  g.fillRect(0, 0, 256, 256);
-  for (let i = 0; i < 1400; i++) {
-    g.fillStyle = `rgba(${40 + Math.random() * 60}, ${35 + Math.random() * 50}, ${20 + Math.random() * 30}, ${0.15 + Math.random() * 0.3})`;
-    const s = 1 + Math.random() * 4;
-    g.fillRect(Math.random() * 256, Math.random() * 256, s, s);
+  g.fillStyle = '#6e614a';
+  g.fillRect(0, 0, size, size);
+  // dirt grain
+  for (let i = 0; i < 9000; i++) {
+    const v = 35 + Math.random() * 70;
+    g.fillStyle = `rgba(${v + 20}, ${v + 8}, ${v - 10}, ${0.12 + Math.random() * 0.3})`;
+    const s = 1 + Math.random() * 3;
+    g.fillRect(Math.random() * size, Math.random() * size, s, s);
   }
-  for (let i = 0; i < 60; i++) {
-    g.fillStyle = `rgba(90, 110, 50, ${0.15 + Math.random() * 0.25})`;
+  // grass patches
+  for (let i = 0; i < 160; i++) {
+    g.fillStyle = `rgba(${70 + Math.random() * 40}, ${95 + Math.random() * 50}, ${35 + Math.random() * 25}, ${0.18 + Math.random() * 0.3})`;
     g.beginPath();
-    g.arc(Math.random() * 256, Math.random() * 256, 4 + Math.random() * 10, 0, Math.PI * 2);
+    g.ellipse(Math.random() * size, Math.random() * size, 6 + Math.random() * 18, 4 + Math.random() * 12, Math.random() * Math.PI, 0, Math.PI * 2);
     g.fill();
   }
-  return new THREE.CanvasTexture(c);
+  // pebbles
+  for (let i = 0; i < 400; i++) {
+    const v = 110 + Math.random() * 60;
+    g.fillStyle = `rgba(${v}, ${v}, ${v - 10}, ${0.35 + Math.random() * 0.4})`;
+    g.beginPath();
+    g.arc(Math.random() * size, Math.random() * size, 1 + Math.random() * 2.2, 0, Math.PI * 2);
+    g.fill();
+  }
+  const color = new THREE.CanvasTexture(c);
+  // bump map from luminance noise
+  const b = document.createElement('canvas');
+  b.width = b.height = size;
+  const bg = b.getContext('2d');
+  bg.fillStyle = '#808080'; bg.fillRect(0, 0, size, size);
+  for (let i = 0; i < 6000; i++) {
+    const v = 60 + Math.random() * 140;
+    bg.fillStyle = `rgba(${v},${v},${v},${0.25 + Math.random() * 0.4})`;
+    const s = 2 + Math.random() * 6;
+    bg.beginPath(); bg.arc(Math.random() * size, Math.random() * size, s, 0, Math.PI * 2); bg.fill();
+  }
+  const bump = new THREE.CanvasTexture(b);
+  return { color, bump };
 }

@@ -24,6 +24,7 @@ export class Weapons {
     this.owned = ['knife', 'pistol'];
     this.currentId = 'pistol';
     this.state = {}; // per weapon: mag
+    this.levels = {}; // per weapon upgrade level (0-10)
     for (const w of WEAPONS) this.state[w.id] = { mag: w.mag || 0 };
     this.cooldown = 0;
     this.reloading = 0;
@@ -72,11 +73,24 @@ export class Weapons {
 
   get current() { return WEAPON_BY_ID[this.currentId]; }
 
+  // Effective stats after upgrade levels: +18% damage, +8% magazine, -4% reload per level.
+  stats(id) {
+    const w = WEAPON_BY_ID[id];
+    const l = this.levels[id] || 0;
+    return { damage: w.damage * (1 + 0.18 * l), mag: w.mag ? Math.round(w.mag * (1 + 0.08 * l)) : 0, reload: w.reload ? w.reload * (1 - 0.04 * l) : 0 };
+  }
+  upgradeCost(id) { const w = WEAPON_BY_ID[id]; const base = Math.max(300, w.price * 0.4); return Math.round(base * Math.pow(1.45, this.levels[id] || 0)); }
+  upgrade(id) {
+    this.levels[id] = (this.levels[id] || 0) + 1;
+    this.state[id].mag = this.stats(id).mag;
+    if (this.currentId === id) this.hud.setWeapon(this.current, this.state[id], this.stats(id));
+  }
+
   own(id) {
     if (this.owned.includes(id)) return;
     // keep the canonical order so number keys stay predictable
     this.owned = WEAPONS.filter((w) => this.owned.includes(w.id) || w.id === id).map((w) => w.id);
-    this.state[id].mag = WEAPON_BY_ID[id].mag || 0;
+    this.state[id].mag = this.stats(id).mag;
     this.equip(id);
     this.hud.refreshSlots(this);
   }
@@ -102,15 +116,16 @@ export class Weapons {
     this.viewRoot.add(this.viewModel);
     this.viewModel.position.set(...w.view).add(new THREE.Vector3(0, -0.3, 0)); // raise-in animation
     this.hud.refreshSlots(this);
-    this.hud.setWeapon(w, this.state[id]);
+    this.hud.setWeapon(w, this.state[id], this.stats(id));
     if (!silent) SFX.reload();
   }
 
   reload() {
     const w = this.current;
     if (w.kind === 'melee' || this.reloading > 0) return;
-    if (this.state[w.id].mag >= w.mag) return;
-    this.reloading = w.reload;
+    const st = this.stats(w.id);
+    if (this.state[w.id].mag >= st.mag) return;
+    this.reloading = st.reload;
     SFX.reload();
     this.hud.setReloading(true);
   }
@@ -121,7 +136,7 @@ export class Weapons {
     this.cooldown = Math.max(0, this.cooldown - dt);
     if (this.reloading > 0) {
       this.reloading -= dt;
-      if (this.reloading <= 0) { st.mag = w.mag; this.hud.setReloading(false); this.hud.setWeapon(w, st); }
+      if (this.reloading <= 0) { st.mag = this.stats(w.id).mag; this.hud.setReloading(false); this.hud.setWeapon(w, st, this.stats(w.id)); }
     }
     const aiming = this.player.aim && w.kind !== 'melee';
     // view model placement: base position, ADS lerp, sway, kick
@@ -177,6 +192,7 @@ export class Weapons {
   fire() {
     const w = this.current;
     const st = this.state[w.id];
+    const dmg = this.stats(w.id).damage;
     this.cooldown = 60 / w.rpm;
     SFX.shot(w.sfx);
     const cam = this.camera;
@@ -187,13 +203,13 @@ export class Weapons {
       this.raycaster.set(origin, fwd);
       this.raycaster.far = w.range;
       const hits = this.raycaster.intersectObjects(this.enemies.hitboxes, false);
-      if (hits.length) { this.applyHit(hits[0], w.damage * this.damageMult, hits[0].object.userData.part === 'head'); return; }
+      if (hits.length) { this.applyHit(hits[0], dmg * this.damageMult, hits[0].object.userData.part === 'head'); return; }
       const hw = this.raycaster.intersectObjects(this.world.raycastTargets, false);
       if (hw.length) this.particles.emit(hw[0].point, { count: 6, color: 0xffcc66, speed: 3, life: 0.3 });
       return;
     }
     st.mag--;
-    this.hud.setWeapon(w, st);
+    this.hud.setWeapon(w, st, this.stats(w.id));
     this.kick.set(rand(-0.01, 0.01), 0.01, 0.03 + (w.damage / 400));
     this.player.recoil += 0.3 + w.damage / 200;
     this.player.pitch += (0.004 + w.damage / 12000) * (this.player.aim ? 0.5 : 1);
@@ -203,7 +219,7 @@ export class Weapons {
     this.muzzleSprite.material.opacity = 1;
     this.muzzleSprite.material.rotation = Math.random() * Math.PI * 2;
 
-    if (w.kind === 'projectile') { this.launch(w, origin, fwd); return; }
+    if (w.kind === 'projectile') { this.launch(w, origin, fwd, dmg); return; }
 
     const spread = w.spread * (this.player.aim ? 0.35 : 1) * (Math.hypot(this.player.vel.x, this.player.vel.z) > 4 ? 1.6 : 1);
     for (let p = 0; p < w.pellets; p++) {
@@ -217,7 +233,7 @@ export class Weapons {
       let end = origin.clone().addScaledVector(dir, 200);
       if (eh.length && (!wh.length || eh[0].distance < wh[0].distance)) {
         end = eh[0].point;
-        this.applyHit(eh[0], w.damage * this.damageMult, eh[0].object.userData.part === 'head');
+        this.applyHit(eh[0], dmg * this.damageMult, eh[0].object.userData.part === 'head');
       } else if (wh.length) {
         end = wh[0].point;
         this.particles.emit(end, { count: 5, color: 0xffd28a, speed: 4, life: 0.35, spread: 1 });
@@ -228,7 +244,7 @@ export class Weapons {
 
   applyHit(hit, dmg, crit) {
     const enemy = hit.object.userData.enemy;
-    const res = this.enemies.hit(enemy, crit ? dmg * 2.2 : dmg, hit.point);
+    const res = this.enemies.hit(enemy, crit ? dmg * 2.2 : dmg, hit.point, { headshot: crit });
     this.particles.emit(hit.point, { count: 10, color: 0x9b1111, speed: 3, life: 0.5, spread: 1 });
     this.floaters.add(hit.point.clone().add(new THREE.Vector3(rand(-0.3, 0.3), 0.3, 0)), Math.round(crit ? dmg * 2.2 : dmg).toString(), crit ? 'crit' : 'dmg');
     this.hud.hitmarker(res.killed);
@@ -243,7 +259,7 @@ export class Weapons {
     this.tracers.push({ line, life: 0.07 });
   }
 
-  async launch(w, origin, dir) {
+  async launch(w, origin, dir, dmg) {
     let mesh;
     if (w.ammoModel) {
       const gltf = await loadGLTF(A.weapon(w.ammoModel));
@@ -263,7 +279,7 @@ export class Weapons {
     mesh.position.copy(this.muzzleWorld());
     this.scene.add(mesh);
     const vel = dir.clone().multiplyScalar(w.speed);
-    this.projectiles.push({ mesh, vel, life: w.fuse, w, prev: mesh.position.clone(), bounces: 0 });
+    this.projectiles.push({ mesh, vel, life: w.fuse, w, dmg, prev: mesh.position.clone(), bounces: 0 });
   }
 
   updateProjectiles(dt) {
@@ -292,11 +308,11 @@ export class Weapons {
         }
         hitPoint = wh[0].point;
       }
-      if (hitPoint) { this.explode(hitPoint, p.w); this.removeProjectile(i); continue; }
+      if (hitPoint) { this.explode(hitPoint, p.w, p.dmg); this.removeProjectile(i); continue; }
       p.mesh.position.add(step);
       p.mesh.lookAt(p.mesh.position.clone().add(p.vel));
       if (p.w.gravity === 0) this.particles.emit(p.mesh.position, { count: 2, color: 0xbbbbbb, speed: 0.5, life: 0.6, gravity: -0.5, spread: 0.3 });
-      if (p.life <= 0) { this.explode(p.mesh.position.clone(), p.w); this.removeProjectile(i); }
+      if (p.life <= 0) { this.explode(p.mesh.position.clone(), p.w, p.dmg); this.removeProjectile(i); }
     }
   }
 
@@ -306,7 +322,7 @@ export class Weapons {
     this.projectiles.splice(i, 1);
   }
 
-  explode(center, w) {
+  explode(center, w, dmg = w.damage) {
     SFX.explosion();
     this.particles.emit(center, { count: 90, color: 0xff8a2a, speed: 9, life: 0.7, spread: 1, gravity: 5 });
     this.particles.emit(center, { count: 60, color: 0x333333, speed: 4, life: 1.4, spread: 1, gravity: -1.5 });
@@ -317,13 +333,13 @@ export class Weapons {
     let t = 0;
     const fade = () => { t += 0.016; light.intensity = Math.max(0, 40 * (1 - t / 0.35)); if (t < 0.35) requestAnimationFrame(fade); else this.scene.remove(light); };
     fade();
-    const results = this.enemies.damageArea(center, w.radius, w.damage * this.damageMult);
+    const results = this.enemies.damageArea(center, w.radius, dmg * this.damageMult);
     for (const r of results) {
       this.floaters.add(r.pos.clone().add(new THREE.Vector3(0, 1.8, 0)), Math.round(r.dmg).toString(), 'dmg');
       this.hud.hitmarker(r.killed);
     }
     const dp = this.player.eye.distanceTo(center);
-    if (dp < w.radius) this.player.damage(Math.round(w.damage * 0.3 * (1 - dp / w.radius)), center);
+    if (dp < w.radius) this.player.damage(Math.round(dmg * 0.3 * (1 - dp / w.radius)), center);
     this.player.shake = Math.min(4, this.player.shake + 3 * Math.max(0.2, 1 - dp / 30));
   }
 }

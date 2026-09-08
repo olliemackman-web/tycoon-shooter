@@ -30,6 +30,8 @@ export class Player {
     this.shake = 0;
     this.onDeath = null;
     this.touchMove = { x: 0, y: 0 };
+    this.speedMult = 1;
+    this.regenRate = 6;
     this.touch = false; // set by main when touch controls are active
 
     dom.addEventListener('click', () => { if (!this.touch && !this.locked && !this.dead) dom.requestPointerLock(); });
@@ -65,7 +67,7 @@ export class Player {
       }
     }
     const sprint = k.ShiftLeft && !this.aim;
-    const speed = (sprint ? 9 : 5.8) * (this.aim ? 0.6 : 1);
+    const speed = (sprint ? 9 : 5.8) * (this.aim ? 0.6 : 1) * this.speedMult;
     if (move.lengthSq() > 0) { const mag = this.touchMove.x || this.touchMove.y ? Math.min(1, move.length()) : 1; move.normalize().multiplyScalar(speed * mag); }
     // smooth horizontal velocity
     const accel = this.onGround ? 14 : 4;
@@ -93,7 +95,7 @@ export class Player {
     this.camera.rotation.z = Math.sin(this.bob * 0.5) * 0.004 * Math.min(1, moving / 4);
 
     if (this.regenDelay > 0) this.regenDelay -= dt;
-    else if (this.hp < this.maxHp && !this.dead) this.hp = Math.min(this.maxHp, this.hp + 6 * dt);
+    else if (this.hp < this.maxHp && !this.dead) this.hp = Math.min(this.maxHp, this.hp + this.regenRate * dt);
   }
 
   damage(amount, fromPos) {

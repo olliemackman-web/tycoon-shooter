@@ -4,6 +4,13 @@ import { Player } from './player.js';
 import { Weapons } from './weapons.js';
 import { Enemies } from './enemies.js';
 import { Tycoon } from './tycoon.js';
+import { Walls } from './walls.js';
+import { Allies } from './allies.js';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { HUD } from './hud.js';
 import { Particles, Floaters } from './util.js';
 import { loadSave, writeSave, clearSave } from './save.js';
@@ -11,12 +18,12 @@ import { unlockAudio } from './audio.js';
 import { isTouch, setupTouch, enterFullscreenLandscape } from './touch.js';
 
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-renderer.setPixelRatio(Math.min(devicePixelRatio, isTouch ? 1.0 : 1.5));
+renderer.setPixelRatio(Math.min(devicePixelRatio, isTouch ? 1.0 : 2));
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.05;
+renderer.toneMappingExposure = 0.8;
 document.body.prepend(renderer.domElement);
 
 const scene = new THREE.Scene();
@@ -30,7 +37,23 @@ const particles = new Particles(scene);
 const floaters = new Floaters(camera);
 const enemies = new Enemies({ scene, player, world, particles, floaters, hud });
 const weapons = new Weapons({ scene, camera, player, world, enemies, particles, floaters, hud });
-const tycoon = new Tycoon({ scene, player, hud, floaters, particles, enemies, weapons });
+const walls = new Walls({ scene, world });
+const allies = new Allies({ scene, world, enemies, weapons, particles, hud });
+enemies.walls = walls;
+const tycoon = new Tycoon({ scene, player, hud, floaters, particles, enemies, weapons, walls, allies });
+
+// Post-processing on desktop: MSAA render target + soft bloom on the emissive bits. Phones render directly.
+let composer = null;
+if (!isTouch) {
+  const target = new THREE.WebGLRenderTarget(innerWidth, innerHeight, { samples: 4, type: THREE.HalfFloatType });
+  composer = new EffectComposer(renderer, target);
+  composer.addPass(new RenderPass(scene, camera));
+  const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.28, 0.5, 0.92);
+  composer.addPass(bloom);
+  composer.addPass(new OutputPass());
+}
+scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture;
+scene.environmentIntensity = 0.35;
 player.touch = isTouch;
 setupTouch({ player, weapons, tycoon });
 if (isTouch) { world.mobile = true; renderer.domElement.style.touchAction = 'none'; }
@@ -56,7 +79,7 @@ async function init() {
   if (save) {
     tycoon.restore(save.tycoon);
     enemies.restore(save.enemies);
-    if (save.weapons?.owned) { for (const id of save.weapons.owned) weapons.owned.includes(id) || weapons.owned.push(id); weapons.own(save.weapons.current || 'pistol'); }
+    if (save.weapons?.owned) { for (const id of save.weapons.owned) weapons.owned.includes(id) || weapons.owned.push(id); weapons.levels = save.weapons.levels || {}; for (const id of weapons.owned) weapons.state[id].mag = weapons.stats(id).mag; weapons.own(save.weapons.current || 'pistol'); }
     tycoon.applyPurchases();
     tycoon.refreshPads();
     tycoon.updateVaultLabel();
@@ -86,10 +109,10 @@ document.addEventListener('pointerlockchange', () => {
   }
 });
 
-enemies.onKill = (e) => {
-  tycoon.addMoney(e.reward, e.root.position.clone().add(new THREE.Vector3(0, 2.2, 0)));
+enemies.onKill = (e, mult = 1) => {
+  tycoon.addMoney(Math.round(e.reward * mult), e.root.position.clone().add(new THREE.Vector3(0, 2.2, 0)));
 };
-enemies.onWaveClear = (w) => { tycoon.addMoney(100 * w); saveNow(); };
+enemies.onWaveClear = (w, bonus) => { tycoon.addMoney(bonus); saveNow(); };
 tycoon.onChange = () => saveNow();
 player.onDeath = () => {
   const ds = document.getElementById('deathscreen');
@@ -102,7 +125,7 @@ player.onDeath = () => {
 };
 
 function saveNow() {
-  writeSave({ tycoon: tycoon.serialize(), enemies: enemies.serialize(), weapons: { owned: weapons.owned, current: weapons.currentId }, t: Date.now() });
+  writeSave({ tycoon: tycoon.serialize(), enemies: enemies.serialize(), weapons: { owned: weapons.owned, current: weapons.currentId, levels: weapons.levels }, t: Date.now() });
 }
 setInterval(() => { if (started) saveNow(); }, 8000);
 
@@ -112,6 +135,7 @@ function fitToWindow() {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
+  composer?.setSize(innerWidth, innerHeight);
 }
 addEventListener('resize', fitToWindow);
 addEventListener('orientationchange', () => setTimeout(fitToWindow, 100));
@@ -127,6 +151,7 @@ function loop() {
     weapons.update(dt);
     enemies.update(dt);
     tycoon.update(dt);
+    allies.update(dt);
     world.update(dt);
   } else {
     // idle camera drift on the menu so the scene is visible behind the overlay
@@ -135,9 +160,9 @@ function loop() {
   particles.update(dt);
   floaters.update(dt);
   hud.setHealth(player.hp, player.maxHp);
-  renderer.render(scene, camera);
+  if (composer) composer.render(); else renderer.render(scene, camera);
 }
 // Debug hook (used for automated checks): window.__game.start() runs without pointer lock.
-window.__game = { player, weapons, enemies, tycoon, world, scene, camera, renderer, start() { started = true; overlay.classList.add('hidden'); player.locked = true; }, save: saveNow, step(seconds) { const n = Math.round(seconds * 60); for (let i = 0; i < n; i++) { const dt = 1 / 60; player.update(dt); weapons.update(dt); enemies.update(dt); tycoon.update(dt); world.update(dt); particles.update(dt); floaters.update(dt); } } };
+window.__game = { player, weapons, enemies, tycoon, world, walls, allies, scene, camera, renderer, start() { started = true; overlay.classList.add('hidden'); player.locked = true; }, save: saveNow, step(seconds) { const n = Math.round(seconds * 60); for (let i = 0; i < n; i++) { const dt = 1 / 60; player.update(dt); weapons.update(dt); enemies.update(dt); tycoon.update(dt); allies.update(dt); world.update(dt); particles.update(dt); floaters.update(dt); } } };
 window.__game.ready = init().catch((err) => { status.textContent = 'Failed to load: ' + err.message; console.error(err); });
 loop();

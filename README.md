@@ -19,14 +19,22 @@ Touch devices get a virtual joystick (left), drag-to-look (right half), and FIRE
 
 - **Tycoon** (`src/tycoon.js`): walk onto a gold pad to buy it. The first dropper is free. Droppers drop ore onto the conveyor, refiners multiply it as it passes, the collector at the end deposits into the vault. Press **E** at the green pad to collect, or buy the Auto Collector. Later pads add sentry turrets, body armor and weapon damage.
 - **Armory** (red pads, right of the plot): buy weapons with coins. Number keys / scroll switch, **R** reloads, right-click aims (the sniper scopes).
-- **Enemies** (`src/enemies.js`): waves of hazmat raiders (and red brutes from wave 3) run at you and punch. Kills pay coins, wave clears pay a bonus, dying costs 10% of your wallet.
+- **Upgrades** (`src/upgrades.js`): ~100 upgrades in chains. Each chain shows its next pad once the previous one is bought, so the pad grid stays readable. Effects are derived from how many of each chain you own (`Tycoon.level(prefix)`), which is why the save only stores ids.
+- **Enemies** (`src/enemies.js`): waves of hazmat raiders (red brutes from wave 3, zombies mixed in from wave 4) run at you. **Every 5th wave is a horde**: 2.5× the numbers, 1.6× the health, doubled bounties, and a giant boss zombie. Kills pay coins, wave clears pay a bonus, dying costs 10% of your wallet.
+- **Walls** (`src/walls.js`): four tiers ring the plot with a gate at the front. Enemies that get stuck on a segment attack it; the blue repair pad by the collector fixes everything for 1.5× the damage taken.
+- **Allies** (`src/allies.js`): hire Sam, Shaun and Lis as gun guards on fixed posts, Matt as a melee brawler, and the pug and German shepherd as attack dogs that chase anything near the base.
+- **Weapon levels**: after buying a gun, its armory pad upgrades it (10 levels: +18% damage, +8% magazine, -4% reload each).
 - **Weapons** (`src/weapons.js`): hitscan guns with headshot crits, plus a bouncing grenade launcher and a rocket launcher with splash damage.
 - Progress saves to `localStorage` every few seconds and on every purchase. **Reset save** is on the start screen.
 
 ## Assets
 
-- `public/assets/weapons`, `props`, `characters` — the low-poly war pack (Blender glTF exports). The characters are rigged with Idle/Run/Punch/Death clips and carry every weapon as a child node; the game shows only the one each enemy holds.
+- `public/assets/weapons`, `props`, `characters` — the low-poly war pack plus the zombie/survivor pack (Blender glTF exports). The characters are rigged with Idle/Run/Punch/Death clips (dogs: Idle/Run/Attack) and carry weapons as child nodes; the game shows only the one each character holds.
 - `public/assets/tycoon` — "Tycoon Asset Pack #1" by Jay_Foo (CC-BY-4.0, see `license.txt`), used scaled down as the factory backdrop behind the plot.
+
+## Graphics
+
+Desktop renders through an `EffectComposer` with a 4× MSAA target, a light bloom on emissive parts and an `OutputPass`; an atmospheric `Sky`, a room environment map for reflections, 4096 shadow maps and a bump-mapped ground. Touch devices skip the composer and use 1024 shadow maps.
 
 ## Debugging
 
