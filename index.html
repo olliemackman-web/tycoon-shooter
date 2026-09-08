@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Hazmat Siege Tycoon</title>
+<style>
+  :root { --hud: rgba(10, 14, 18, 0.72); --accent: #ffd54a; --danger: #ff5252; --ok: #6cf28a; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0f12; font-family: "Segoe UI", system-ui, -apple-system, sans-serif; color: #eef2f5; user-select: none; }
+  canvas { display: block; }
+  #hud { position: fixed; inset: 0; pointer-events: none; }
+  .panel { position: absolute; background: var(--hud); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 10px 14px; backdrop-filter: blur(6px); font-size: 14px; line-height: 1.35; }
+  #money { top: 16px; left: 16px; min-width: 190px; }
+  #money .big { font-size: 26px; font-weight: 700; color: var(--accent); letter-spacing: 0.5px; }
+  #money .sub { opacity: 0.8; font-size: 13px; }
+  #waves { top: 16px; right: 16px; text-align: right; min-width: 170px; }
+  #waves .big { font-size: 20px; font-weight: 700; }
+  #waves .warn { color: var(--danger); font-weight: 700; }
+  #health { bottom: 16px; left: 16px; width: 260px; }
+  #healthbar { height: 14px; background: rgba(255,255,255,0.12); border-radius: 7px; overflow: hidden; margin-top: 6px; }
+  #healthfill { height: 100%; width: 100%; background: linear-gradient(90deg, #ff5252, #ffb74d); transition: width 0.15s; }
+  #weapon { bottom: 16px; right: 16px; text-align: right; min-width: 200px; }
+  #weapon .name { font-size: 18px; font-weight: 700; }
+  #weapon .ammo { font-size: 28px; font-weight: 700; color: var(--accent); }
+  #weapon .ammo.low { color: var(--danger); }
+  #weapon .reload { color: var(--accent); font-weight: 600; display: none; }
+  #slots { position: absolute; bottom: 110px; right: 16px; display: flex; gap: 6px; flex-direction: column; align-items: flex-end; }
+  .slot { background: var(--hud); border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; padding: 3px 8px; font-size: 12px; opacity: 0.7; }
+  .slot.active { border-color: var(--accent); color: var(--accent); opacity: 1; }
+  #crosshair { position: absolute; left: 50%; top: 50%; width: 22px; height: 22px; transform: translate(-50%, -50%); }
+  #crosshair::before, #crosshair::after { content: ""; position: absolute; background: #fff; box-shadow: 0 0 3px #000; }
+  #crosshair::before { left: 50%; top: 0; width: 2px; height: 100%; transform: translateX(-50%); }
+  #crosshair::after { top: 50%; left: 0; height: 2px; width: 100%; transform: translateY(-50%); }
+  #crosshair .dot { position: absolute; left: 50%; top: 50%; width: 6px; height: 6px; background: #0b0f12; transform: translate(-50%,-50%); }
+  #hitmarker { position: absolute; left: 50%; top: 50%; width: 30px; height: 30px; transform: translate(-50%,-50%) rotate(45deg); opacity: 0; }
+  #hitmarker span { position: absolute; background: #fff; }
+  #hitmarker.show { opacity: 1; transition: none; }
+  #hitmarker.fade { opacity: 0; transition: opacity 0.25s; }
+  #hitmarker.kill span { background: var(--danger); }
+  #prompt { position: absolute; left: 50%; bottom: 120px; transform: translateX(-50%); background: var(--hud); padding: 8px 16px; border-radius: 8px; font-size: 15px; border: 1px solid rgba(255,213,74,0.35); display: none; }
+  #log { position: absolute; left: 50%; top: 70px; transform: translateX(-50%); display: flex; flex-direction: column; gap: 4px; align-items: center; }
+  .logline { background: var(--hud); padding: 5px 12px; border-radius: 6px; font-size: 14px; animation: fadeout 3.5s forwards; }
+  .logline.good { color: var(--ok); }
+  .logline.bad { color: var(--danger); }
+  @keyframes fadeout { 0%, 70% { opacity: 1; } 100% { opacity: 0; } }
+  #floaters { position: absolute; inset: 0; overflow: hidden; }
+  .floater { position: absolute; transform: translate(-50%, -50%); font-weight: 800; font-size: 16px; color: var(--accent); text-shadow: 0 0 4px #000, 0 2px 2px #000; animation: rise 1s forwards; white-space: nowrap; }
+  .floater.dmg { color: #fff; font-size: 14px; }
+  .floater.crit { color: var(--danger); font-size: 18px; }
+  @keyframes rise { from { opacity: 1; margin-top: 0; } to { opacity: 0; margin-top: -50px; } }
+  #damageflash { position: absolute; inset: 0; background: radial-gradient(ellipse at center, rgba(255,0,0,0) 55%, rgba(255,0,0,0.55) 100%); opacity: 0; transition: opacity 0.35s; }
+  #overlay { position: fixed; inset: 0; background: rgba(6, 9, 12, 0.88); display: flex; align-items: center; justify-content: center; z-index: 10; }
+  #overlay .card { background: #131a20; border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 28px 34px; max-width: 560px; text-align: center; box-shadow: 0 20px 60px rgba(0,0,0,0.6); }
+  #overlay h1 { margin: 0 0 6px; font-size: 34px; letter-spacing: 1px; color: var(--accent); }
+  #overlay h2 { margin: 0 0 14px; font-size: 16px; font-weight: 500; opacity: 0.85; }
+  #overlay p { margin: 6px 0; opacity: 0.9; font-size: 14px; }
+  #overlay .keys { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; text-align: left; margin: 14px auto; font-size: 13px; width: fit-content; }
+  #overlay .keys b { color: var(--accent); }
+  #overlay button { margin-top: 12px; padding: 12px 26px; font-size: 16px; font-weight: 700; background: var(--accent); color: #111; border: 0; border-radius: 8px; cursor: pointer; }
+  #overlay button.secondary { background: transparent; color: #aaa; font-weight: 500; font-size: 13px; padding: 6px 12px; margin-left: 8px; }
+  #overlay #status { font-size: 13px; opacity: 0.7; margin-top: 10px; }
+  #overlay.hidden { display: none; }
+  #deathscreen { position: fixed; inset: 0; background: rgba(120, 0, 0, 0.45); display: none; align-items: center; justify-content: center; flex-direction: column; z-index: 9; }
+  #deathscreen h1 { font-size: 44px; margin: 0; text-shadow: 0 2px 12px #000; }
+  #deathscreen p { font-size: 18px; }
+  #zoomvignette { position: absolute; inset: 0; display: none; background: radial-gradient(circle at center, rgba(0,0,0,0) 32%, rgba(0,0,0,0.92) 34%); }
+  #zoomvignette::before { content: ""; position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: rgba(255,255,255,0.35); }
+  #zoomvignette::after { content: ""; position: absolute; top: 50%; left: 0; right: 0; height: 1px; background: rgba(255,255,255,0.35); }
+
+  /* ---- touch controls ---- */
+  #touch { position: absolute; inset: 0; display: none; }
+  body.touch #touch { display: block; }
+  #stick { position: absolute; left: 26px; bottom: 26px; width: 130px; height: 130px; border-radius: 50%; background: rgba(255,255,255,0.08); border: 2px solid rgba(255,255,255,0.25); pointer-events: auto; touch-action: none; }
+  #knob { position: absolute; left: 50%; top: 50%; width: 56px; height: 56px; margin: -28px 0 0 -28px; border-radius: 50%; background: rgba(255,255,255,0.55); box-shadow: 0 2px 8px rgba(0,0,0,0.4); }
+  #lookzone { position: absolute; left: 45%; right: 0; top: 0; bottom: 0; pointer-events: auto; touch-action: none; }
+  .tbtn { position: absolute; display: flex; align-items: center; justify-content: center; border-radius: 50%; background: rgba(20,24,28,0.6); border: 2px solid rgba(255,255,255,0.3); color: #fff; font-weight: 800; font-size: 14px; pointer-events: auto; touch-action: none; user-select: none; -webkit-user-select: none; }
+  .tbtn.down { background: rgba(255,213,74,0.75); color: #111; border-color: #ffd54a; }
+  #tb-fire { right: 22px; bottom: 34px; width: 96px; height: 96px; font-size: 18px; border-color: rgba(255,82,82,0.8); }
+  .tbtn.small { width: 58px; height: 58px; font-size: 11px; }
+  #tb-aim { right: 130px; bottom: 30px; }
+  #tb-jump { right: 130px; bottom: 100px; }
+  #tb-reload { right: 40px; bottom: 142px; }
+  #tb-swap { right: 200px; bottom: 30px; }
+  #tb-use { right: 200px; bottom: 100px; border-color: rgba(108,242,138,0.8); }
+  body.touch #slots { display: none; }
+  body.touch #weapon { bottom: auto; top: 16px; right: 200px; min-width: 150px; }
+  body.touch #health { left: 50%; transform: translateX(-50%); width: 200px; bottom: 8px; padding: 6px 10px; }
+  body.touch #prompt { bottom: 62px; font-size: 13px; }
+  body.touch #crosshair { width: 18px; height: 18px; }
+  @media (max-height: 520px) {
+    .panel { padding: 6px 10px; font-size: 12px; border-radius: 8px; }
+    #money .big { font-size: 20px; }
+    #waves .big { font-size: 16px; }
+    #weapon .ammo { font-size: 22px; }
+    #weapon .name { font-size: 14px; }
+    #log { top: 44px; }
+    .logline { font-size: 12px; padding: 3px 8px; }
+    #overlay .card { padding: 14px 20px; max-width: 92vw; max-height: 92vh; overflow: auto; }
+    #overlay h1 { font-size: 22px; } #overlay h2 { font-size: 13px; margin-bottom: 6px; } #overlay p { font-size: 12px; margin: 3px 0; }
+    #overlay .keys { font-size: 11px; margin: 8px auto; gap: 2px 10px; }
+    #overlay button { padding: 9px 20px; font-size: 14px; margin-top: 6px; }
+  }
+  #banner { position: absolute; left: 50%; top: 22%; transform: translate(-50%, -50%) scale(0.8); text-align: center; opacity: 0; pointer-events: none; }
+  #banner.show { animation: bannerin 4s forwards; }
+  #banner h1 { margin: 0; font-size: 56px; letter-spacing: 4px; color: var(--danger); text-shadow: 0 0 30px rgba(255,40,40,0.8), 0 3px 0 #300; }
+  #banner p { margin: 6px 0 0; font-size: 18px; color: #fff; text-shadow: 0 2px 6px #000; }
+  @keyframes bannerin { 0% { opacity: 0; transform: translate(-50%,-50%) scale(0.6); } 10% { opacity: 1; transform: translate(-50%,-50%) scale(1.05); } 15% { transform: translate(-50%,-50%) scale(1); } 80% { opacity: 1; } 100% { opacity: 0; } }
+  @media (max-height: 520px) { #banner h1 { font-size: 30px; } #banner p { font-size: 13px; } }
+  #rotate { position: fixed; inset: 0; z-index: 20; display: none; align-items: center; justify-content: center; text-align: center; background: #0b0f12; font-size: 20px; padding: 24px; }
+  @media (orientation: portrait) and (pointer: coarse) { #rotate { display: flex; } }
+  body.touch #overlay .keys.desktop { display: none; }
+  #overlay .keys.mobile { display: none; }
+  body.touch #overlay .keys.mobile { display: grid; }
+</style>
+  <script type="module" crossorigin src="./assets/index-B6VFk-q1.js"></script>
+</head>
+<body>
+<div id="hud">
+  <div id="zoomvignette"></div>
+  <div id="damageflash"></div>
+  <div id="crosshair"><div class="dot"></div></div>
+  <div id="hitmarker"><span style="left:0;top:0;width:10px;height:2px"></span><span style="right:0;top:0;width:10px;height:2px"></span><span style="left:0;bottom:0;width:10px;height:2px"></span><span style="right:0;bottom:0;width:10px;height:2px"></span><span style="left:0;top:0;width:2px;height:10px"></span><span style="right:0;top:0;width:2px;height:10px"></span><span style="left:0;bottom:0;width:2px;height:10px"></span><span style="right:0;bottom:0;width:2px;height:10px"></span></div>
+  <div id="money" class="panel"><div class="big">$<span id="wallet">0</span></div><div class="sub">Vault: $<span id="vault">0</span> <span id="autoc"></span></div><div class="sub">Income: $<span id="income">0</span>/min</div></div>
+  <div id="waves" class="panel"><div class="big">Wave <span id="wave">0</span></div><div>Enemies: <span id="alive">0</span></div><div id="nextwave">Next wave in <span id="countdown">--</span>s</div></div>
+  <div id="health" class="panel"><div>Health <span id="hp">100</span></div><div id="healthbar"><div id="healthfill"></div></div></div>
+  <div id="slots"></div>
+  <div id="weapon" class="panel"><div class="name" id="wname">Pistol</div><div class="ammo"><span id="mag">12</span> <span style="font-size:14px;opacity:.7">/ ∞</span></div><div class="reload" id="reloading">RELOADING</div></div>
+  <div id="banner"><h1 id="bannertitle"></h1><p id="bannersub"></p></div>
+  <div id="prompt"></div>
+  <div id="log"></div>
+  <div id="floaters"></div>
+</div>
+<div id="rotate">🔄<br><br>Turn your phone sideways to play</div>
+<div id="deathscreen"><h1>YOU DIED</h1><p>Respawning at base in <span id="respawn">3</span>…</p></div>
+<div id="overlay">
+  <div class="card">
+    <h1>HAZMAT SIEGE TYCOON</h1>
+    <h2>Build the plant. Hold the line. Get rich.</h2>
+    <p>Buy droppers and refiners to earn coins from the conveyor. Raiders attack in waves — kill them for cash, buy bigger guns, build walls, hire guards and dogs. Every 5th wave is a zombie horde.</p>
+    <div class="keys desktop">
+      <b>WASD</b><span>Move</span><b>Shift</b><span>Sprint</span><b>Space</b><span>Jump</span>
+      <b>Mouse</b><span>Aim / Fire (hold for automatic)</span><b>Right click</b><span>Aim down sights</span>
+      <b>R</b><span>Reload</span><b>1-9 / Scroll</b><span>Switch weapon</span><b>E</b><span>Collect vault when standing at the collector</span>
+      <b>Walk onto a pad</b><span>Buy the upgrade or weapon</span><b>Esc</b><span>Release mouse</span>
+    </div>
+    <div class="keys mobile">
+      <b>Left stick</b><span>Move</span><b>Drag right side</b><span>Look around</span><b>FIRE</b><span>Hold to shoot</span>
+      <b>AIM</b><span>Toggle aim / scope</span><b>USE</b><span>Collect the vault at the collector</span><b>SWAP</b><span>Next weapon</span>
+      <b>Walk onto a pad</b><span>Buy the upgrade or weapon</span>
+    </div>
+    <button id="play">Loading…</button><button id="reset" class="secondary">Reset save</button>
+    <div id="status">Loading assets…</div>
+  </div>
+</div>
+</body>
+</html>
