@@ -106,11 +106,20 @@ function saveNow() {
 }
 setInterval(() => { if (started) saveNow(); }, 8000);
 
-addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
+function fitToWindow() {
+  const size = renderer.getSize(new THREE.Vector2());
+  if (size.x === innerWidth && size.y === innerHeight) return;
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+}
+addEventListener('resize', fitToWindow);
+addEventListener('orientationchange', () => setTimeout(fitToWindow, 100));
 
 const clock = new THREE.Clock();
 function loop() {
   requestAnimationFrame(loop);
+  fitToWindow(); // phones resize on rotation and when browser chrome hides; the event is not always delivered
   const dt = Math.min(0.05, clock.getDelta());
   const running = started && overlay.classList.contains('hidden');
   if (running) {
