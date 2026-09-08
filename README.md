@@ -9,7 +9,7 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:5173, click **PLAY** (the browser locks the mouse). `npm run build` writes a static bundle to `dist/` that can be dropped on any static host.
+Open http://localhost:5173, click **PLAY** (the browser locks the mouse). `npm run build` writes a static bundle to `dist/`; `npm run deploy` builds and pushes it to the `gh-pages` branch, which GitHub Pages serves at https://olliemackman-web.github.io/tycoon-shooter/.
 
 ## Mobile
 
