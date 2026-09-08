@@ -11,6 +11,10 @@ npm run dev
 
 Open http://localhost:5173, click **PLAY** (the browser locks the mouse). `npm run build` writes a static bundle to `dist/` that can be dropped on any static host.
 
+## Mobile
+
+Touch devices get a virtual joystick (left), drag-to-look (right half), and FIRE / AIM / JUMP / RELOAD / SWAP / USE buttons. Play in landscape; a rotate prompt covers the screen in portrait, and PLAY requests fullscreen. Shadows and pixel ratio are reduced on touch devices. To try it on your phone, run `npm run dev` (it listens on the LAN) and open the `Network:` address Vite prints. Append `?touch=1` to force the touch layout on a desktop browser.
+
 ## How it works
 
 - **Tycoon** (`src/tycoon.js`): walk onto a gold pad to buy it. The first dropper is free. Droppers drop ore onto the conveyor, refiners multiply it as it passes, the collector at the end deposits into the vault. Press **E** at the green pad to collect, or buy the Auto Collector. Later pads add sentry turrets, body armor and weapon damage.

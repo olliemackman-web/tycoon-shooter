@@ -62,12 +62,12 @@ export class Weapons {
         if (this.owned[i]) this.equip(this.owned[i]);
       }
     });
-    document.addEventListener('wheel', (e) => {
-      if (!this.player.locked) return;
-      const i = this.owned.indexOf(this.currentId);
-      const n = (i + (e.deltaY > 0 ? 1 : -1) + this.owned.length) % this.owned.length;
-      this.equip(this.owned[n]);
-    });
+    document.addEventListener('wheel', (e) => { if (this.player.locked) this.cycle(e.deltaY > 0 ? 1 : -1); });
+  }
+
+  cycle(dir) {
+    const i = this.owned.indexOf(this.currentId);
+    this.equip(this.owned[(i + dir + this.owned.length) % this.owned.length]);
   }
 
   get current() { return WEAPON_BY_ID[this.currentId]; }

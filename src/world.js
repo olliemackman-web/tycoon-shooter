@@ -16,14 +16,14 @@ export class World {
   async build(onProgress) {
     const scene = this.scene;
     scene.background = new THREE.Color(0x8fb6d8);
-    scene.fog = new THREE.Fog(0x8fb6d8, 60, 220);
+    scene.fog = new THREE.Fog(0x8fb6d8, this.mobile ? 40 : 60, this.mobile ? 160 : 220);
 
     const hemi = new THREE.HemisphereLight(0xcfe6ff, 0x5a4a32, 1.1);
     scene.add(hemi);
     const sun = new THREE.DirectionalLight(0xfff1d6, 2.6);
     sun.position.set(40, 70, 30);
     sun.castShadow = true;
-    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.mapSize.set(this.mobile ? 1024 : 2048, this.mobile ? 1024 : 2048);
     sun.shadow.camera.near = 10;
     sun.shadow.camera.far = 200;
     const s = 70;

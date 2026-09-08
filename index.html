@@ -66,6 +66,45 @@
   #zoomvignette { position: absolute; inset: 0; display: none; background: radial-gradient(circle at center, rgba(0,0,0,0) 32%, rgba(0,0,0,0.92) 34%); }
   #zoomvignette::before { content: ""; position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: rgba(255,255,255,0.35); }
   #zoomvignette::after { content: ""; position: absolute; top: 50%; left: 0; right: 0; height: 1px; background: rgba(255,255,255,0.35); }
+
+  /* ---- touch controls ---- */
+  #touch { position: absolute; inset: 0; display: none; }
+  body.touch #touch { display: block; }
+  #stick { position: absolute; left: 26px; bottom: 26px; width: 130px; height: 130px; border-radius: 50%; background: rgba(255,255,255,0.08); border: 2px solid rgba(255,255,255,0.25); pointer-events: auto; touch-action: none; }
+  #knob { position: absolute; left: 50%; top: 50%; width: 56px; height: 56px; margin: -28px 0 0 -28px; border-radius: 50%; background: rgba(255,255,255,0.55); box-shadow: 0 2px 8px rgba(0,0,0,0.4); }
+  #lookzone { position: absolute; left: 45%; right: 0; top: 0; bottom: 0; pointer-events: auto; touch-action: none; }
+  .tbtn { position: absolute; display: flex; align-items: center; justify-content: center; border-radius: 50%; background: rgba(20,24,28,0.6); border: 2px solid rgba(255,255,255,0.3); color: #fff; font-weight: 800; font-size: 14px; pointer-events: auto; touch-action: none; user-select: none; -webkit-user-select: none; }
+  .tbtn.down { background: rgba(255,213,74,0.75); color: #111; border-color: #ffd54a; }
+  #tb-fire { right: 22px; bottom: 34px; width: 96px; height: 96px; font-size: 18px; border-color: rgba(255,82,82,0.8); }
+  .tbtn.small { width: 58px; height: 58px; font-size: 11px; }
+  #tb-aim { right: 130px; bottom: 30px; }
+  #tb-jump { right: 130px; bottom: 100px; }
+  #tb-reload { right: 40px; bottom: 142px; }
+  #tb-swap { right: 200px; bottom: 30px; }
+  #tb-use { right: 200px; bottom: 100px; border-color: rgba(108,242,138,0.8); }
+  body.touch #slots { display: none; }
+  body.touch #weapon { bottom: auto; top: 16px; right: 200px; min-width: 150px; }
+  body.touch #health { left: 50%; transform: translateX(-50%); width: 200px; bottom: 8px; padding: 6px 10px; }
+  body.touch #prompt { bottom: 62px; font-size: 13px; }
+  body.touch #crosshair { width: 18px; height: 18px; }
+  @media (max-height: 520px) {
+    .panel { padding: 6px 10px; font-size: 12px; border-radius: 8px; }
+    #money .big { font-size: 20px; }
+    #waves .big { font-size: 16px; }
+    #weapon .ammo { font-size: 22px; }
+    #weapon .name { font-size: 14px; }
+    #log { top: 44px; }
+    .logline { font-size: 12px; padding: 3px 8px; }
+    #overlay .card { padding: 14px 20px; max-width: 92vw; max-height: 92vh; overflow: auto; }
+    #overlay h1 { font-size: 22px; } #overlay h2 { font-size: 13px; margin-bottom: 6px; } #overlay p { font-size: 12px; margin: 3px 0; }
+    #overlay .keys { font-size: 11px; margin: 8px auto; gap: 2px 10px; }
+    #overlay button { padding: 9px 20px; font-size: 14px; margin-top: 6px; }
+  }
+  #rotate { position: fixed; inset: 0; z-index: 20; display: none; align-items: center; justify-content: center; text-align: center; background: #0b0f12; font-size: 20px; padding: 24px; }
+  @media (orientation: portrait) and (pointer: coarse) { #rotate { display: flex; } }
+  body.touch #overlay .keys.desktop { display: none; }
+  #overlay .keys.mobile { display: none; }
+  body.touch #overlay .keys.mobile { display: grid; }
 </style>
 </head>
 <body>
@@ -83,17 +122,23 @@
   <div id="log"></div>
   <div id="floaters"></div>
 </div>
+<div id="rotate">🔄<br><br>Turn your phone sideways to play</div>
 <div id="deathscreen"><h1>YOU DIED</h1><p>Respawning at base in <span id="respawn">3</span>…</p></div>
 <div id="overlay">
   <div class="card">
     <h1>HAZMAT SIEGE TYCOON</h1>
     <h2>Build the plant. Hold the line. Get rich.</h2>
     <p>Buy droppers and refiners to earn coins from the conveyor. Hazmat raiders attack in waves — kill them for cash and buy bigger guns.</p>
-    <div class="keys">
+    <div class="keys desktop">
       <b>WASD</b><span>Move</span><b>Shift</b><span>Sprint</span><b>Space</b><span>Jump</span>
       <b>Mouse</b><span>Aim / Fire (hold for automatic)</span><b>Right click</b><span>Aim down sights</span>
       <b>R</b><span>Reload</span><b>1-9 / Scroll</b><span>Switch weapon</span><b>E</b><span>Collect vault when standing at the collector</span>
       <b>Walk onto a pad</b><span>Buy the upgrade or weapon</span><b>Esc</b><span>Release mouse</span>
+    </div>
+    <div class="keys mobile">
+      <b>Left stick</b><span>Move</span><b>Drag right side</b><span>Look around</span><b>FIRE</b><span>Hold to shoot</span>
+      <b>AIM</b><span>Toggle aim / scope</span><b>USE</b><span>Collect the vault at the collector</span><b>SWAP</b><span>Next weapon</span>
+      <b>Walk onto a pad</b><span>Buy the upgrade or weapon</span>
     </div>
     <button id="play">Loading…</button><button id="reset" class="secondary">Reset save</button>
     <div id="status">Loading assets…</div>

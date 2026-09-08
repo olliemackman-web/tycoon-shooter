@@ -8,9 +8,10 @@ import { HUD } from './hud.js';
 import { Particles, Floaters } from './util.js';
 import { loadSave, writeSave, clearSave } from './save.js';
 import { unlockAudio } from './audio.js';
+import { isTouch, setupTouch, enterFullscreenLandscape } from './touch.js';
 
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
+renderer.setPixelRatio(Math.min(devicePixelRatio, isTouch ? 1.0 : 1.5));
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -30,6 +31,9 @@ const floaters = new Floaters(camera);
 const enemies = new Enemies({ scene, player, world, particles, floaters, hud });
 const weapons = new Weapons({ scene, camera, player, world, enemies, particles, floaters, hud });
 const tycoon = new Tycoon({ scene, player, hud, floaters, particles, enemies, weapons });
+player.touch = isTouch;
+setupTouch({ player, weapons, tycoon });
+if (isTouch) { world.mobile = true; renderer.domElement.style.touchAction = 'none'; }
 
 const status = document.getElementById('status');
 const playBtn = document.getElementById('play');
@@ -70,12 +74,12 @@ playBtn.addEventListener('click', () => {
   if (playBtn.disabled) return;
   unlockAudio();
   overlay.classList.add('hidden');
-  renderer.domElement.requestPointerLock();
+  if (isTouch) { player.locked = true; enterFullscreenLandscape(); } else renderer.domElement.requestPointerLock();
   if (!started) { started = true; enemies.paused = false; }
 });
 document.getElementById('reset').addEventListener('click', () => { if (confirm('Delete your save and start over?')) { clearSave(); location.reload(); } });
 document.addEventListener('pointerlockchange', () => {
-  if (document.pointerLockElement !== renderer.domElement && started && !player.dead) {
+  if (!isTouch && document.pointerLockElement !== renderer.domElement && started && !player.dead) {
     overlay.classList.remove('hidden');
     playBtn.textContent = 'RESUME';
     status.textContent = 'Paused. Click resume to lock the mouse again.';

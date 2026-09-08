@@ -29,9 +29,11 @@ export class Player {
     this.recoil = 0;
     this.shake = 0;
     this.onDeath = null;
+    this.touchMove = { x: 0, y: 0 };
+    this.touch = false; // set by main when touch controls are active
 
-    dom.addEventListener('click', () => { if (!this.locked && !this.dead) dom.requestPointerLock(); });
-    document.addEventListener('pointerlockchange', () => { this.locked = document.pointerLockElement === dom; if (!this.locked) { this.keys = {}; this.fire = false; } });
+    dom.addEventListener('click', () => { if (!this.touch && !this.locked && !this.dead) dom.requestPointerLock(); });
+    document.addEventListener('pointerlockchange', () => { if (this.touch) return; this.locked = document.pointerLockElement === dom; if (!this.locked) { this.keys = {}; this.fire = false; } });
     document.addEventListener('mousemove', (e) => {
       if (!this.locked) return;
       const s = this.sensitivity * (this.aim ? 0.5 : 1);
@@ -40,7 +42,7 @@ export class Player {
     });
     document.addEventListener('keydown', (e) => { if (this.locked) this.keys[e.code] = true; if (e.code === 'Space' && this.locked) e.preventDefault(); });
     document.addEventListener('keyup', (e) => { this.keys[e.code] = false; });
-    dom.addEventListener('mousedown', (e) => { if (!this.locked) return; if (e.button === 0) this.fire = true; if (e.button === 2) this.aim = true; });
+    dom.addEventListener('mousedown', (e) => { if (!this.locked || this.touch) return; if (e.button === 0) this.fire = true; if (e.button === 2) this.aim = true; });
     document.addEventListener('mouseup', (e) => { if (e.button === 0) this.fire = false; if (e.button === 2) this.aim = false; });
     dom.addEventListener('contextmenu', (e) => e.preventDefault());
   }
@@ -57,10 +59,14 @@ export class Player {
       if (k.KeyS) move.sub(this.forward);
       if (k.KeyD) move.add(this.right);
       if (k.KeyA) move.sub(this.right);
+      if (this.touchMove.x || this.touchMove.y) {
+        move.addScaledVector(this.forward, -this.touchMove.y).addScaledVector(this.right, this.touchMove.x);
+        if (move.length() > 1) move.normalize();
+      }
     }
     const sprint = k.ShiftLeft && !this.aim;
     const speed = (sprint ? 9 : 5.8) * (this.aim ? 0.6 : 1);
-    if (move.lengthSq() > 0) move.normalize().multiplyScalar(speed);
+    if (move.lengthSq() > 0) { const mag = this.touchMove.x || this.touchMove.y ? Math.min(1, move.length()) : 1; move.normalize().multiplyScalar(speed * mag); }
     // smooth horizontal velocity
     const accel = this.onGround ? 14 : 4;
     this.vel.x += (move.x - this.vel.x) * Math.min(1, accel * dt);
