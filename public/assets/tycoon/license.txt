@@ -1,0 +1,11 @@
+Model Information:
+* title:	Tycoon Asset Pack #1(Sketch Fab2)
+* source:	https://sketchfab.com/3d-models/tycoon-asset-pack-1sketch-fab2-1f5755d93f3a419285206f7ee5450366
+* author:	Jay_Foo (https://sketchfab.com/Jay_Foo)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Tycoon Asset Pack #1(Sketch Fab2)" (https://sketchfab.com/3d-models/tycoon-asset-pack-1sketch-fab2-1f5755d93f3a419285206f7ee5450366) by Jay_Foo (https://sketchfab.com/Jay_Foo) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
